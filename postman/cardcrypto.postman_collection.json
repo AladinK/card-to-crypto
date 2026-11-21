@@ -1,0 +1,67 @@
+{
+  "info": {
+    "name": "CardCrypto (sandbox)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Sandbox walkthrough. Set {{baseUrl}} and {{secretKey}} (sk_test_…) in the environment."
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "secretKey", "value": "" },
+    { "key": "paymentId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Create payment",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{secretKey}}" },
+          { "key": "Idempotency-Key", "value": "postman-{{$guid}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": \"100.00\",\n  \"currency\": \"EUR\",\n  \"order_id\": \"ORDER-{{$randomInt}}\",\n  \"customer\": { \"email\": \"buyer@example.com\" },\n  \"return_url\": \"https://shop.example/thanks\"\n}"
+        },
+        "url": "{{baseUrl}}/v1/payments"
+      }
+    },
+    {
+      "name": "Get payment",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{secretKey}}" }],
+        "url": "{{baseUrl}}/v1/payments/{{paymentId}}"
+      }
+    },
+    {
+      "name": "Get settlement",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{secretKey}}" }],
+        "url": "{{baseUrl}}/v1/payments/{{paymentId}}/settlement"
+      }
+    },
+    {
+      "name": "Refund (partial)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{secretKey}}" },
+          { "key": "Idempotency-Key", "value": "refund-{{$guid}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": { "mode": "raw", "raw": "{ \"amount\": \"10.00\", \"reason\": \"requested_by_customer\" }" },
+        "url": "{{baseUrl}}/v1/payments/{{paymentId}}/refund"
+      }
+    },
+    {
+      "name": "Transactions ledger",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{secretKey}}" }],
+        "url": "{{baseUrl}}/v1/transactions?limit=25"
+      }
+    }
+  ]
+}

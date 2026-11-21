@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Example shop: pay by card</title>
+</head>
+<body>
+  <!-- Shopper page. The secret key stays on YOUR server: /api/checkout creates the payment and returns checkout_url. -->
+  <h1>Order 10482</h1>
+  <p>Total: €100.00</p>
+  <button id="pay" type="button">Pay by card</button>
+  <p id="error" role="alert"></p>
+  <script type="module">
+    import { cryptoPay } from 'https://esm.sh/@cardcrypto/sdk@0.1.0?bundle';
+    const button = document.getElementById('pay');
+    cryptoPay.bindButton(button, {
+      endpoint: '/api/checkout',
+      body: () => ({ orderId: 'ORDER-10482' }),
+      onError: (message) => (document.getElementById('error').textContent = message),
+    });
+  </script>
+</body>
+</html>

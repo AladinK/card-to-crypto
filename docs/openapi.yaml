@@ -1,0 +1,456 @@
+openapi: 3.1.0
+info:
+  title: CardCrypto API
+  version: 0.1.0
+  summary: Card-to-crypto direct settlement. Customers pay by card; the merchant receives stablecoins on its own wallet.
+  description: |
+    Authentication: `Authorization: Bearer <token>` where the token is either a merchant secret key
+    (`sk_test_…` sandbox, `sk_live_…` live) or a dashboard access token.
+
+    Modes: keys fix the mode. Dashboard tokens choose the mode with the `X-Mode: test|live` header (default `test`).
+
+    Idempotency: `POST /v1/payments` and `POST /v1/payments/{id}/refund` require an `Idempotency-Key` header
+    (8-255 characters). Replays return the original response with `Idempotent-Replayed: true`.
+    The same key with a different body returns 422 `idempotency_key_reused`.
+
+    Errors: `{ "error": { "type", "code", "message", "details?", "request_id" } }`. Codes are stable.
+
+    Money: amounts are decimal strings with at most two decimals (`"100.00"`). Crypto amounts are decimal strings in whole units.
+
+    Webhooks: header `CardCrypto-Signature: t=<unix>,v1=<hex>`, `v1 = HMAC-SHA256(secret, "<t>.<raw body>")`.
+    Reject when the timestamp is more than 300 seconds old. Deduplicate on the body `id`.
+servers:
+  - url: http://localhost:3000
+    description: Local development (sandbox)
+security:
+  - bearerAuth: []
+tags:
+  - name: Payments
+  - name: Refunds
+  - name: Settlements
+  - name: Wallets
+  - name: Quotes
+  - name: Webhooks
+  - name: Auth
+  - name: Account
+  - name: Admin
+  - name: System
+paths:
+  /healthz:
+    get:
+      tags: [System]
+      security: []
+      summary: Liveness probe
+      responses:
+        '200': { description: Process is alive }
+  /readyz:
+    get:
+      tags: [System]
+      security: []
+      summary: Readiness probe (checks the database)
+      responses:
+        '200': { description: Ready }
+        '503': { description: Database unavailable }
+  /v1/auth/register:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Create a merchant account and its owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [merchant_name, email, password]
+              properties:
+                merchant_name: { type: string, maxLength: 120 }
+                email: { type: string, format: email }
+                password: { type: string, minLength: 12, maxLength: 200 }
+                country: { type: string, pattern: '^[A-Z]{2}$' }
+      responses:
+        '201': { description: Account created; returns access and refresh tokens }
+        '409': { description: Email already registered }
+        '429': { description: Rate limited }
+  /v1/auth/login:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Sign in (with a TOTP code when two-factor is enabled)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+                totp_code: { type: string, pattern: '^\d{6}$' }
+      responses:
+        '200': { description: Tokens issued }
+        '401': { description: Invalid credentials or totp_required }
+        '423': { description: Account temporarily locked after repeated failures }
+  /v1/auth/refresh:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Rotate the refresh token. Reusing a rotated token revokes the whole session family.
+      responses:
+        '200': { description: New token pair }
+        '401': { description: Invalid, expired or reused refresh token }
+  /v1/auth/logout:
+    post:
+      tags: [Auth]
+      security: []
+      responses:
+        '204': { description: Session family revoked }
+  /v1/auth/mfa/setup:
+    post:
+      tags: [Auth]
+      summary: Create a TOTP secret (shown once) for the signed-in user
+      responses:
+        '200': { description: Secret and otpauth URI }
+  /v1/auth/mfa/enable:
+    post:
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [code], properties: { code: { type: string, pattern: '^\d{6}$' } } }
+      responses:
+        '204': { description: Two-factor enabled }
+        '401': { description: Code invalid }
+  /v1/me:
+    get:
+      tags: [Account]
+      summary: Signed-in user, merchant status, KYB status and live-mode flag
+      responses:
+        '200': { description: Account summary }
+  /v1/api-keys:
+    get:
+      tags: [Account]
+      summary: List API keys (secrets are never returned here)
+      responses:
+        '200': { description: Keys }
+    post:
+      tags: [Account]
+      summary: Create an API key. The secret is returned once.
+      description: Live keys require an approved business verification, live mode enabled, and two-factor sign-in.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, maxLength: 100 }
+                mode: { type: string, enum: [test, live], default: test }
+      responses:
+        '201': { description: Key created (includes secret) }
+        '403': { description: live_mode_not_enabled, kyb_not_approved or mfa_required }
+  /v1/api-keys/{id}/rotate:
+    post:
+      tags: [Account]
+      summary: Create a replacement key and expire the old one after a grace period
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, properties: { grace_hours: { type: integer, minimum: 0, maximum: 168, default: 24 } } }
+      responses:
+        '201': { description: Replacement key (includes secret) }
+  /v1/api-keys/{id}/revoke:
+    post:
+      tags: [Account]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '204': { description: Revoked }
+  /v1/stores:
+    get:
+      tags: [Account]
+      responses:
+        '200': { description: Stores }
+    post:
+      tags: [Account]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, platform]
+              properties:
+                name: { type: string }
+                platform: { type: string, enum: [shopify, woocommerce, magento, prestashop, bigcommerce, custom, headless] }
+                domain: { type: string }
+      responses:
+        '201': { description: Store created }
+  /v1/wallet:
+    get:
+      tags: [Wallets]
+      summary: Settlement wallets of the merchant
+      responses:
+        '200': { description: Wallets with verification and usability status }
+    post:
+      tags: [Wallets]
+      summary: Register a settlement wallet. Returns a message that must be signed by the wallet.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [blockchain, asset, address]
+              properties:
+                blockchain: { type: string, enum: [ethereum, polygon, base, arbitrum] }
+                asset: { type: string, enum: [USDC, USDT] }
+                address: { type: string }
+      responses:
+        '201': { description: Wallet created with verification.message }
+        '422': { description: invalid_address, unsupported_asset_for_chain or address_not_allowed }
+  /v1/wallet/{id}/verify:
+    post:
+      tags: [Wallets]
+      summary: Prove control of the address with an EIP-191 personal signature over verification.message
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [signature], properties: { signature: { type: string, pattern: '^0x[0-9a-fA-F]+$' } } }
+      responses:
+        '200': { description: Wallet verified }
+        '422': { description: invalid_signature or verification_expired }
+  /v1/wallet/{id}/default:
+    post:
+      tags: [Wallets]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Set as default for its chain and asset }
+  /v1/wallet/{id}/disable:
+    post:
+      tags: [Wallets]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '204': { description: Disabled }
+  /v1/exchange-rates:
+    get:
+      tags: [Quotes]
+      summary: Current rate (fiat per one unit of the asset)
+      parameters:
+        - { name: asset, in: query, schema: { type: string, default: USDC } }
+        - { name: currency, in: query, schema: { type: string, default: EUR } }
+      responses:
+        '200': { description: Rate with source and timestamp }
+  /v1/quotes:
+    post:
+      tags: [Quotes]
+      summary: Preview a conversion with a 30-second validity window and the full fee breakdown
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, currency, asset, blockchain]
+              properties:
+                amount: { type: string }
+                currency: { type: string, enum: [EUR, USD, GBP, CHF, CAD, AUD, RSD] }
+                asset: { type: string, enum: [USDC, USDT] }
+                blockchain: { type: string, enum: [ethereum, polygon, base, arbitrum] }
+                wallet_id: { type: string }
+      responses:
+        '201': { description: Quote with expires_at (30 seconds) }
+  /v1/payments:
+    get:
+      tags: [Payments]
+      summary: List payments (cursor pagination by starting_after)
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+        - { name: status, in: query, schema: { type: string } }
+        - { name: starting_after, in: query, schema: { type: string } }
+      responses:
+        '200': { description: Page of payments }
+    post:
+      tags: [Payments]
+      summary: Create a hosted checkout for an order
+      description: |
+        Creates the payment and returns `checkout_url`. Redirect the shopper there.
+        One open payment is allowed per order. An order that is already paid returns 409 `order_already_paid`.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, minLength: 8, maxLength: 255 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, currency, order_id, return_url]
+              additionalProperties: false
+              properties:
+                amount: { type: string, example: '100.00' }
+                currency: { type: string, enum: [EUR, USD, GBP, CHF, CAD, AUD, RSD] }
+                order_id: { type: string, maxLength: 128 }
+                customer: { type: object, properties: { email: { type: string, format: email } } }
+                description: { type: string, maxLength: 250 }
+                return_url: { type: string, format: uri }
+                cancel_url: { type: string, format: uri }
+                metadata: { type: object, additionalProperties: { type: string } }
+                store_id: { type: string }
+                settlement:
+                  type: object
+                  properties:
+                    wallet_id: { type: string }
+                    blockchain: { type: string, enum: [ethereum, polygon, base, arbitrum] }
+                    asset: { type: string, enum: [USDC, USDT] }
+      responses:
+        '201': { description: Payment created (status PAYMENT_PENDING, checkout_url) }
+        '400': { description: idempotency_key_required }
+        '403': { description: payment_declined, merchant_frozen or live_mode_not_enabled }
+        '409': { description: order_already_paid, payment_already_open or order_amount_mismatch }
+        '422': { description: idempotency_key_reused, invalid_request, no_settlement_wallet }
+        '503': { description: provider or chain unavailable (safe to retry with the same key) }
+  /v1/payments/{id}:
+    get:
+      tags: [Payments]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Payment }
+        '404': { description: Not found in this mode }
+  /v1/payments/{id}/settlement:
+    get:
+      tags: [Settlements]
+      summary: Conversion, fees, transfer hash, confirmations and hold reason
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Settlement details }
+  /v1/payments/{id}/refund:
+    post:
+      tags: [Refunds]
+      summary: Full or partial refund (fiat). Crypto is not reversed automatically.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, minLength: 8, maxLength: 255 }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                amount: { type: string }
+                reason: { type: string, enum: [requested_by_customer, duplicate, fraudulent, other], default: requested_by_customer }
+      responses:
+        '201': { description: Refund recorded (SUCCEEDED or PENDING) with crypto_recovery }
+        '409': { description: refund_not_allowed (payment not settled yet) }
+        '422': { description: refund_exceeds_refundable }
+  /v1/transactions:
+    get:
+      tags: [Settlements]
+      summary: Ledger view with fees, merchant received amount, wallet, transaction hash and timestamps
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+      responses:
+        '200': { description: Ledger rows }
+  /v1/analytics/summary:
+    get:
+      tags: [Settlements]
+      summary: Dashboard KPIs for a period
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+      responses:
+        '200': { description: Summary }
+  /v1/webhook-endpoints:
+    get:
+      tags: [Webhooks]
+      responses:
+        '200': { description: Endpoints (secrets are never returned) }
+    post:
+      tags: [Webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url, events]
+              properties:
+                url: { type: string, format: uri }
+                events:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: string
+                    enum: ['*', payment.created, payment.authorized, payment.captured, payment.failed, payment.cancelled, conversion.completed, settlement.created, settlement.confirmed, settlement.failed, refund.created, refund.completed, refund.failed]
+      responses:
+        '201': { description: Endpoint created; the signing secret is returned once }
+  /v1/webhook-endpoints/{id}/rotate-secret:
+    post:
+      tags: [Webhooks]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: New secret (shown once) }
+  /v1/webhook-endpoints/{id}/disable:
+    post:
+      tags: [Webhooks]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '204': { description: Disabled }
+  /v1/webhook-deliveries:
+    get:
+      tags: [Webhooks]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [PENDING, DELIVERED, RETRYING, DEAD] } }
+      responses:
+        '200': { description: Delivery log }
+  /v1/webhook-deliveries/{id}:
+    get:
+      tags: [Webhooks]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Delivery with the attempt log }
+  /v1/webhook-deliveries/{id}/replay:
+    post:
+      tags: [Webhooks]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '202': { description: Re-queued as a new delivery }
+  /webhooks/providers/stripe:
+    post:
+      tags: [System]
+      security: []
+      summary: Inbound Stripe events (signature verified over the raw body)
+      responses:
+        '200': { description: Recorded }
+        '400': { description: Invalid signature }
+  /checkout/sandbox/{id}:
+    get:
+      tags: [System]
+      security: []
+      summary: Sandbox hosted checkout with test cards (test mode only)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: t, in: query, required: true, schema: { type: string } }
+      responses:
+        '200': { description: HTML page }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Merchant secret key (sk_test_… / sk_live_…) or dashboard access token.
+  headers:
+    CardCryptoSignature:
+      description: 't=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>">'
+      schema: { type: string }

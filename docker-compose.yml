@@ -1,0 +1,53 @@
+# Local production-like stack. Not tested in the authoring environment (no Docker daemon there).
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: cardcrypto
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: cardcrypto
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cardcrypto -d cardcrypto"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    build: .
+    command: ["node", "backend/dist/db/migrate-cli.js"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://cardcrypto:${POSTGRES_PASSWORD}@postgres:5432/cardcrypto
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://cardcrypto:${POSTGRES_PASSWORD}@postgres:5432/cardcrypto
+      TRUST_PROXY: "true"
+    ports:
+      - "3000:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: ["node", "backend/dist/worker.js"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://cardcrypto:${POSTGRES_PASSWORD}@postgres:5432/cardcrypto
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  pgdata:

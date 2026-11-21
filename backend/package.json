@@ -1,0 +1,42 @@
+{
+  "name": "@cardcrypto/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev:api": "tsx watch src/server.ts",
+    "dev:worker": "tsx watch src/worker.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start:api": "node dist/server.js",
+    "start:worker": "node dist/worker.js",
+    "migrate": "tsx src/db/migrate-cli.ts",
+    "test": "vitest run",
+    "test:unit": "vitest run test/unit",
+    "demo": "tsx src/scripts/sandbox-demo.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.0.0",
+    "@fastify/helmet": "^13.0.0",
+    "@fastify/rate-limit": "^11.0.0",
+    "decimal.js": "^10.6.0",
+    "fastify": "^5.8.0",
+    "jose": "^6.0.0",
+    "pg": "^8.16.0",
+    "stripe": "^23.0.0",
+    "viem": "^2.38.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.15.0",
+    "ganache": "^7.9.2",
+    "solc": "^0.8.39",
+    "tsx": "^4.20.0",
+    "typescript": "~5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

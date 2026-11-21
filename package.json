@@ -1,0 +1,19 @@
+{
+  "name": "card-to-crypto",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Card-to-crypto direct settlement: pay by card, merchant receives crypto on their own wallet.",
+  "license": "UNLICENSED",
+  "workspaces": [
+    "backend",
+    "sdk"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "npm run build -w @cardcrypto/backend && npm run build -w @cardcrypto/sdk",
+    "typecheck": "npm run typecheck -w @cardcrypto/backend && npm run typecheck -w @cardcrypto/sdk",
+    "test": "npm run test -w @cardcrypto/backend && npm run test -w @cardcrypto/sdk"
+  }
+}
