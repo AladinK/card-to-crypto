@@ -252,6 +252,36 @@ $ty_fake->set_payment( (string) $order64->get_meta( CC_META_PAYMENT ), array( 's
 $ty->thankyou_page( 64 );
 cc_same( 'return page does not complete a failed payment', 'pending', $order64->get_status() );
 
+// Every status the brief names as "captured or later" completes the order; the others do not.
+$captured_statuses = array( 'PAYMENT_CAPTURED', 'CONVERSION_PENDING', 'CONVERSION_COMPLETED', 'CRYPTO_TRANSFER_PENDING', 'CRYPTO_TRANSFER_SUBMITTED', 'CRYPTO_CONFIRMING', 'SETTLED', 'PARTIALLY_REFUNDED', 'REFUNDED' );
+foreach ( $captured_statuses as $i => $status ) {
+	$id    = 100 + $i;
+	$order = cc_order( $id, '100.00' );
+	$ty->process_payment( $id );
+	$ty_fake->set_payment( (string) $order->get_meta( CC_META_PAYMENT ), array( 'status' => $status ) );
+	$ty->thankyou_page( $id );
+	cc_same( "return page completes an order when the payment is {$status}", 'processing', $order->get_status() );
+}
+
+$not_captured_statuses = array( 'CREATED', 'PAYMENT_PENDING', 'PAYMENT_AUTHORIZED', 'FAILED', 'CANCELLED' );
+foreach ( $not_captured_statuses as $i => $status ) {
+	$id    = 120 + $i;
+	$order = cc_order( $id, '100.00' );
+	$ty->process_payment( $id );
+	$ty_fake->set_payment( (string) $order->get_meta( CC_META_PAYMENT ), array( 'status' => $status ) );
+	$ty->thankyou_page( $id );
+	cc_same( "return page leaves the order alone when the payment is {$status}", 'pending', $order->get_status() );
+}
+
+// CREATED is an open status too: the checkout is reused, not replaced.
+$created_order = cc_order( 130, '100.00' );
+$ty->process_payment( 130 );
+$ty_fake->set_payment( (string) $created_order->get_meta( CC_META_PAYMENT ), array( 'status' => 'CREATED' ) );
+$posts_before_created = count( cc_posts( $ty_fake ) );
+$reused               = $ty->process_payment( 130 );
+cc_same( 'a CREATED payment is reused for the customer', 'success', $reused['result'] ?? null );
+cc_same( 'a CREATED payment does not trigger a new POST', $posts_before_created, count( cc_posts( $ty_fake ) ) );
+
 $calls_before_done = count( $ty_fake->calls );
 $order65           = cc_order( 65, '100.00', 'processing' );
 $ty->thankyou_page( 65 );
