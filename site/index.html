@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Card-to-Crypto Direct Settlement</title>
+  <meta name="description" content="Customers pay by card. The merchant receives USDC or USDT on its own wallet.">
+  <style>
+    :root { color-scheme: light dark; --bg:#f5f6f8; --card:#ffffff; --ink:#111318; --muted:#5b616e; --line:#e2e5ea; --accent:#0b6e4f; --warn-bg:#fff4d6; --warn-ink:#6b4b00; }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) { --bg:#0e1116; --card:#171b22; --ink:#eef1f5; --muted:#a4acb9; --line:#2a303a; --accent:#4cc9a0; --warn-bg:#3a2e10; --warn-ink:#ffd98a; }
+    }
+    :root[data-theme="dark"] { --bg:#0e1116; --card:#171b22; --ink:#eef1f5; --muted:#a4acb9; --line:#2a303a; --accent:#4cc9a0; --warn-bg:#3a2e10; --warn-ink:#ffd98a; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+    main { max-width: 880px; margin: 0 auto; padding: 32px 16px 56px; }
+    h1 { font-size: clamp(26px, 5vw, 36px); line-height: 1.2; margin: 8px 0 8px; }
+    h2 { font-size: 20px; margin: 0 0 12px; }
+    p { margin: 0 0 12px; }
+    .lead { color: var(--muted); font-size: 18px; margin-bottom: 20px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin: 16px 0; }
+    .notice { background: var(--warn-bg); color: var(--warn-ink); border-radius: 10px; padding: 14px 16px; margin: 16px 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 15px; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; }
+    a { color: var(--accent); }
+    ul.links { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+    ul.links li a { display: block; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; text-decoration: none; }
+    ul.links li a:hover, ul.links li a:focus-visible { border-color: var(--accent); outline: none; }
+    ul.links li small { display: block; color: var(--muted); }
+    pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; font-size: 14px; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .table-wrap { overflow-x: auto; }
+    /* On phones the status table becomes a stack of labelled rows instead of a clipped grid. */
+    @media (max-width: 600px) {
+      thead { display: none; }
+      table, tbody, tr, td { display: block; width: 100%; }
+      tr { border-bottom: 1px solid var(--line); padding: 10px 0; }
+      td { border: 0; padding: 4px 0; }
+    }
+    @media (min-width: 720px) { ul.links { grid-template-columns: 1fr 1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <p class="lead">Customers pay by card. The merchant receives USDC or USDT on its own wallet.</p>
+  <h1>Card-to-Crypto Direct Settlement</h1>
+
+  <div class="notice" role="note">
+    <strong>MVP.</strong> The sandbox works end to end. Live payments stay disabled until the legal, licensing and treasury requirements in
+    <a href="https://github.com/AladinK/card-to-crypto/blob/main/docs/LEGAL_AND_TECHNICAL_DEPENDENCIES.md">the dependencies document</a> are complete.
+    This page is static. It cannot run the API, the worker or the database.
+  </div>
+
+  <section class="card" aria-labelledby="components">
+    <h2 id="components">What is in the repository</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th scope="col">Component</th><th scope="col">Status</th></tr></thead>
+        <tbody>
+          <tr><td>Backend API and worker (Fastify, PostgreSQL 16, viem, Stripe SDK)</td><td>Implemented. 68 backend tests, including an end-to-end sandbox flow and an EVM test on an in-process chain.</td></tr>
+          <tr><td>SDK (<code>@cardcrypto/sdk</code>)</td><td>Implemented. Server client, webhook verification and <code>cryptoPay.checkout()</code>. 4 tests.</td></tr>
+          <tr><td>Merchant dashboard (Next.js, backend-for-frontend)</td><td>Implemented. The refresh token stays in an httpOnly cookie. Needs its own server next to the API.</td></tr>
+          <tr><td>WooCommerce gateway</td><td>Implemented. Verified with PHP harness tests. Not run inside WordPress.</td></tr>
+          <tr><td>Shopify app</td><td>OAuth, webhooks and order sync implemented. Not verified on a live store. Native Shopify checkout is not implemented.</td></tr>
+          <tr><td>Docker image and compose file</td><td>Written. Not built in the authoring environment.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="docs">
+    <h2 id="docs">Documentation</h2>
+    <ul class="links">
+      <li><a href="api/"><strong>API reference</strong><small>OpenAPI specification, rendered</small></a></li>
+      <li><a href="https://github.com/AladinK/card-to-crypto"><strong>Source code</strong><small>GitHub repository</small></a></li>
+      <li><a href="https://github.com/AladinK/card-to-crypto/blob/main/README.md"><strong>README</strong><small>Quick start and sandbox walkthrough</small></a></li>
+      <li><a href="https://github.com/AladinK/card-to-crypto/blob/main/docs/ARCHITECTURE.md"><strong>Architecture</strong><small>State machine, payment and settlement flows</small></a></li>
+      <li><a href="https://github.com/AladinK/card-to-crypto/blob/main/docs/SECURITY.md"><strong>Security model</strong><small>Controls and known gaps</small></a></li>
+      <li><a href="https://github.com/AladinK/card-to-crypto/blob/main/docs/REFUND_POLICY.md"><strong>Refund policy</strong><small>Fiat refunds and crypto recovery</small></a></li>
+      <li><a href="https://github.com/AladinK/card-to-crypto/blob/main/docs/DEPLOYMENT.md"><strong>Deployment</strong><small>Local, Docker and production checklist</small></a></li>
+      <li><a href="https://github.com/AladinK/card-to-crypto/blob/main/docs/LEGAL_AND_TECHNICAL_DEPENDENCIES.md"><strong>Legal and technical dependencies</strong><small>In Serbian</small></a></li>
+      <li><a href="https://github.com/AladinK/card-to-crypto/blob/main/docs/TEST_RESULTS.md"><strong>Test results</strong><small>What was run and what was not</small></a></li>
+    </ul>
+  </section>
+
+  <section class="card" aria-labelledby="run">
+    <h2 id="run">Run the sandbox locally</h2>
+    <p>Requires Node.js 22 and PostgreSQL 16. Sandbox mode moves no real money.</p>
+<pre><code>git clone https://github.com/AladinK/card-to-crypto.git
+cd card-to-crypto
+npm install
+cp .env.example backend/.env        # fill in the secrets, see docs/DEPLOYMENT.md
+npm run migrate -w @cardcrypto/backend
+npm run dev:api -w @cardcrypto/backend
+npm run dev:worker -w @cardcrypto/backend
+API_URL=http://localhost:3000 npm run demo -w @cardcrypto/backend</code></pre>
+  </section>
+</main>
+</body>
+</html>
