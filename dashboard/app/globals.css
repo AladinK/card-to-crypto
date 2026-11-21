@@ -1,0 +1,178 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens. Light is the default. Dark applies when the OS asks for it, unless the user chose light,
+ * and whenever data-theme="dark" is set (the theme toggle writes that attribute).
+ */
+:root {
+  color-scheme: light;
+  --background: #f6f7f9;
+  --foreground: #111827;
+  --card: #ffffff;
+  --card-foreground: #111827;
+  --muted: #f1f3f6;
+  --muted-foreground: #4b5563;
+  --border: #e3e6eb;
+  --input: #9aa3b2;
+  --ring: #4f46e5;
+  --primary: #4338ca;
+  --primary-hover: #3730a3;
+  --primary-foreground: #ffffff;
+  --accent: #eef2ff;
+  --accent-foreground: #3730a3;
+  --danger: #b91c1c;
+  --danger-hover: #991b1b;
+  --danger-foreground: #ffffff;
+  --danger-text: #b91c1c;
+  --danger-soft: #fef2f2;
+  --success-text: #047857;
+  --success-soft: #ecfdf5;
+  --warning-text: #92400e;
+  --warning-soft: #fffbeb;
+  --info-text: #1d4ed8;
+  --info-soft: #eff6ff;
+  --test-text: #92400e;
+  --test-soft: #fef3c7;
+  --test-border: #fcd34d;
+  --live-text: #065f46;
+  --live-soft: #d1fae5;
+  --live-border: #6ee7b7;
+  --sidebar: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --background: #0b0e14;
+    --foreground: #e5e7eb;
+    --card: #121722;
+    --card-foreground: #e5e7eb;
+    --muted: #1a2130;
+    --muted-foreground: #9ca3af;
+    --border: #232b3b;
+    --input: #5b6579;
+    --ring: #818cf8;
+    --primary: #4f46e5;
+    --primary-hover: #4338ca;
+    --primary-foreground: #ffffff;
+    --accent: #1e1b4b;
+    --accent-foreground: #c7d2fe;
+    --danger: #b91c1c;
+    --danger-hover: #991b1b;
+    --danger-foreground: #ffffff;
+    --danger-text: #fca5a5;
+    --danger-soft: #2a1116;
+    --success-text: #6ee7b7;
+    --success-soft: #0d2b22;
+    --warning-text: #fcd34d;
+    --warning-soft: #2b2110;
+    --info-text: #93c5fd;
+    --info-soft: #0f1d33;
+    --test-text: #fcd34d;
+    --test-soft: #2b2110;
+    --test-border: #854d0e;
+    --live-text: #6ee7b7;
+    --live-soft: #0d2b22;
+    --live-border: #047857;
+    --sidebar: #0f131c;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #0b0e14;
+  --foreground: #e5e7eb;
+  --card: #121722;
+  --card-foreground: #e5e7eb;
+  --muted: #1a2130;
+  --muted-foreground: #9ca3af;
+  --border: #232b3b;
+  --input: #5b6579;
+  --ring: #818cf8;
+  --primary: #4f46e5;
+  --primary-hover: #4338ca;
+  --primary-foreground: #ffffff;
+  --accent: #1e1b4b;
+  --accent-foreground: #c7d2fe;
+  --danger: #b91c1c;
+  --danger-hover: #991b1b;
+  --danger-foreground: #ffffff;
+  --danger-text: #fca5a5;
+  --danger-soft: #2a1116;
+  --success-text: #6ee7b7;
+  --success-soft: #0d2b22;
+  --warning-text: #fcd34d;
+  --warning-soft: #2b2110;
+  --info-text: #93c5fd;
+  --info-soft: #0f1d33;
+  --test-text: #fcd34d;
+  --test-soft: #2b2110;
+  --test-border: #854d0e;
+  --live-text: #6ee7b7;
+  --live-soft: #0d2b22;
+  --live-border: #047857;
+  --sidebar: #0f131c;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-danger: var(--danger);
+  --color-danger-hover: var(--danger-hover);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-danger-text: var(--danger-text);
+  --color-danger-soft: var(--danger-soft);
+  --color-success-text: var(--success-text);
+  --color-success-soft: var(--success-soft);
+  --color-warning-text: var(--warning-text);
+  --color-warning-soft: var(--warning-soft);
+  --color-info-text: var(--info-text);
+  --color-info-soft: var(--info-soft);
+  --color-test-text: var(--test-text);
+  --color-test-soft: var(--test-soft);
+  --color-test-border: var(--test-border);
+  --color-live-text: var(--live-text);
+  --color-live-soft: var(--live-soft);
+  --color-live-border: var(--live-border);
+  --color-sidebar: var(--sidebar);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+/* Visible keyboard focus everywhere, including elements that do not style their own focus ring. */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
