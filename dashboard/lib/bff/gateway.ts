@@ -12,9 +12,17 @@ export const isMode = (value: unknown): value is Mode => value === 'test' || val
 const NO_STORE = { 'cache-control': 'no-store' } as const;
 
 /** Error body in the same shape the API uses, so the browser handles one format everywhere. */
-export function errorResponse(status: number, code: string, message: string, requestId?: string): NextResponse {
+export function errorResponse(status: number, code: string, message: string, requestId?: string, details?: unknown): NextResponse {
   return NextResponse.json(
-    { error: { type: status >= 500 ? 'api_error' : 'invalid_request', code, message, ...(requestId ? { request_id: requestId } : {}) } },
+    {
+      error: {
+        type: status >= 500 ? 'api_error' : 'invalid_request',
+        code,
+        message,
+        ...(requestId ? { request_id: requestId } : {}),
+        ...(details !== undefined && status < 500 ? { details } : {}),
+      },
+    },
     { status, headers: NO_STORE },
   );
 }
@@ -31,7 +39,7 @@ export function failureResponse(error: unknown): NextResponse {
     res.cookies.set(REFRESH_COOKIE, '', refreshCookieOptions(0));
     return res;
   }
-  if (error instanceof BackendError) return errorResponse(error.status, error.code, error.message, error.requestId);
+  if (error instanceof BackendError) return errorResponse(error.status, error.code, error.message, error.requestId, error.details);
   if (error instanceof BackendUnreachableError) {
     return errorResponse(502, 'upstream_unavailable', 'The payments API is unreachable. Check that the backend is running.');
   }

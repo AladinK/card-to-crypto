@@ -14,6 +14,7 @@ require_once __DIR__ . '/fake-cardcrypto-api.php';
 $plugin_dir = dirname( __DIR__, 2 ) . '/';
 require_once $plugin_dir . 'includes/class-cardcrypto-signature.php';
 require_once $plugin_dir . 'includes/class-cardcrypto-logger.php';
+require_once $plugin_dir . 'includes/class-cardcrypto-api-exception.php';
 require_once $plugin_dir . 'includes/class-cardcrypto-api.php';
 require_once $plugin_dir . 'includes/class-cardcrypto-webhook.php';
 require_once $plugin_dir . 'includes/class-wc-gateway-cardcrypto.php';

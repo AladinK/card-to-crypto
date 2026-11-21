@@ -14,6 +14,9 @@
 
 defined( 'ABSPATH' ) || exit;
 
+/**
+ * Checks the CardCrypto-Signature header against the raw request body.
+ */
 final class CardCrypto_Signature {
 
 	/** Maximum distance, in seconds, between the signed timestamp and the current time. */
@@ -69,6 +72,7 @@ final class CardCrypto_Signature {
 	 * A duplicate or malformed timestamp rejects the whole header. Malformed v1 entries are
 	 * ignored, because they could never match the 64-character expected digest anyway.
 	 *
+	 * @param string $header Raw header value.
 	 * @return array{0: int, 1: list<string>}|null
 	 */
 	private static function parse_header( string $header ): ?array {

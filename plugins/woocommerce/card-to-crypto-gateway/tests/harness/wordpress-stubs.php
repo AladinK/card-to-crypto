@@ -447,6 +447,15 @@ function wp_remote_request( $url, $args = array() ) {
 	return $transport( (string) $url, (array) $args );
 }
 
+function wp_parse_url( $url, $component = -1 ) {
+	return parse_url( (string) $url, $component );
+}
+
+/** Stand-in: WordPress wraps json_encode() and returns false on failure, as this does. */
+function wp_json_encode( $data, $options = 0, $depth = 512 ) {
+	return json_encode( $data, $options, $depth );
+}
+
 function is_wp_error( $thing ) {
 	return $thing instanceof WP_Error;
 }

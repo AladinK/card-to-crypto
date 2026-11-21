@@ -1,17 +1,20 @@
 <?php
 /**
- * "Pay by card" gateway. The customer pays on the CardCrypto hosted checkout; the merchant
- * receives USDC or USDT on their own wallet.
+ * "Pay by card" gateway. The customer pays on the CardCrypto hosted checkout; the merchant receives
+ * USDC or USDT in their own wallet.
  *
  * Order meta used by this class:
- *   _cardcrypto_payment_id  id of the CardCrypto payment for the order (the one to reuse or check)
- *   _cardcrypto_attempt     number of the last Idempotency-Key that was spent (see start_card_payment())
+ *   _cardcrypto_payment_id  id of the CardCrypto payment that belongs to the order.
+ *   _cardcrypto_attempt     number of the last Idempotency-Key that was spent (see start_card_payment()).
  *
  * @package CardCryptoGateway
  */
 
 defined( 'ABSPATH' ) || exit;
 
+/**
+ * Payment gateway for WooCommerce, id "cardcrypto".
+ */
 class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 
 	public const GATEWAY_ID           = 'cardcrypto';
@@ -39,6 +42,9 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 
 	private const TEST_RESULT_PREFIX = 'cardcrypto_test_result_';
 
+	/**
+	 * Sets up the gateway and its hooks.
+	 */
 	public function __construct() {
 		$this->id                 = self::GATEWAY_ID;
 		$this->icon               = '';
@@ -57,6 +63,9 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 		add_action( 'woocommerce_thankyou_' . $this->id, array( $this, 'thankyou_page' ) );
 	}
 
+	/**
+	 * Settings fields shown on the gateway's settings page.
+	 */
 	public function init_form_fields() {
 		$this->form_fields = array(
 			'enabled'         => array(
@@ -112,13 +121,14 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 	}
 
 	/**
-	 * Adds the webhook URL and a connection test below the standard settings table.
-	 * The test uses the saved settings, so it is a separate link rather than a form button.
+	 * Settings page: the standard fields, then the webhook URL and a connection test.
+	 *
+	 * The test uses the saved settings, so it is a link rather than a form button.
 	 */
 	public function admin_options() {
 		parent::admin_options();
 
-		if ( ! current_user_can( 'manage_woocommerce' ) ) {
+		if ( ! current_user_can( 'manage_woocommerce' ) ) { // phpcs:ignore WordPress.WP.Capabilities.Unknown -- WooCommerce's capability.
 			return;
 		}
 
@@ -138,11 +148,12 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 	}
 
 	/**
-	 * Password-style row that never prints the saved value. The saved key is shown only as a
+	 * Password-style settings row that never prints the saved value. The saved key appears only as a
 	 * masked placeholder, and a blank submission keeps the saved key (see the validate_* methods).
 	 *
 	 * @param string               $key  Field key.
-	 * @param array<string, mixed> $data Field data.
+	 * @param array<string, mixed> $data Field definition.
+	 * @return string Table row HTML.
 	 */
 	public function generate_password_html( $key, $data ) {
 		$field_key = $this->get_field_key( $key );
@@ -165,13 +176,13 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 		?>
 		<tr valign="top">
 			<th scope="row" class="titledesc">
-				<label for="<?php echo esc_attr( $field_key ); ?>"><?php echo wp_kses_post( $data['title'] ); ?> <?php echo $this->get_tooltip_html( $data ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Sanitized by WooCommerce. ?></label>
+				<label for="<?php echo esc_attr( $field_key ); ?>"><?php echo wp_kses_post( $data['title'] ); ?> <?php echo $this->get_tooltip_html( $data ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- WooCommerce sanitizes the tooltip. ?></label>
 			</th>
 			<td class="forminp">
 				<fieldset>
 					<legend class="screen-reader-text"><span><?php echo wp_kses_post( $data['title'] ); ?></span></legend>
 					<input class="input-text regular-input <?php echo esc_attr( $data['class'] ); ?>" type="password" name="<?php echo esc_attr( $field_key ); ?>" id="<?php echo esc_attr( $field_key ); ?>" style="<?php echo esc_attr( $data['css'] ); ?>" value="" placeholder="<?php echo esc_attr( $placeholder ); ?>" autocomplete="new-password" <?php disabled( $data['disabled'], true ); ?> />
-					<?php echo $this->get_description_html( $data ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Sanitized by WooCommerce. ?>
+					<?php echo $this->get_description_html( $data ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- WooCommerce sanitizes the description. ?>
 				</fieldset>
 			</td>
 		</tr>
@@ -180,7 +191,14 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 		return (string) ob_get_clean();
 	}
 
-	/** @param mixed $value */
+	/**
+	 * Validates the secret key. A blank value keeps the saved key.
+	 *
+	 * @param string $key   Field key.
+	 * @param mixed  $value Posted value, or null when not posted.
+	 * @return string
+	 * @throws Exception When the value is not a CardCrypto secret key.
+	 */
 	public function validate_secret_key_field( $key, $value ) {
 		$submitted = trim( (string) wp_unslash( (string) $value ) );
 
@@ -189,13 +207,20 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 		}
 
 		if ( 1 !== preg_match( '/^sk_(?:test|live)_[A-Za-z0-9_-]{16,200}$/', $submitted ) ) {
-			throw new Exception( __( 'The secret key must start with sk_test_ or sk_live_ and contain only letters, digits, "_" and "-".', 'card-to-crypto-gateway' ) );
+			throw new Exception( esc_html__( 'The secret key must start with sk_test_ or sk_live_ and contain only letters, digits, "_" and "-".', 'card-to-crypto-gateway' ) );
 		}
 
 		return $submitted;
 	}
 
-	/** @param mixed $value */
+	/**
+	 * Validates the webhook signing secret. A blank value keeps the saved secret.
+	 *
+	 * @param string $key   Field key.
+	 * @param mixed  $value Posted value, or null when not posted.
+	 * @return string
+	 * @throws Exception When the value is not a webhook secret.
+	 */
 	public function validate_webhook_secret_field( $key, $value ) {
 		$submitted = trim( (string) wp_unslash( (string) $value ) );
 
@@ -204,31 +229,41 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 		}
 
 		if ( 1 !== preg_match( '/^whsec_[A-Za-z0-9_-]{16,200}$/', $submitted ) ) {
-			throw new Exception( __( 'The webhook signing secret must start with whsec_.', 'card-to-crypto-gateway' ) );
+			throw new Exception( esc_html__( 'The webhook signing secret must start with whsec_.', 'card-to-crypto-gateway' ) );
 		}
 
 		return $submitted;
 	}
 
-	/** @param mixed $value */
+	/**
+	 * Validates the API base URL: an absolute https URL, or http for localhost only.
+	 *
+	 * @param string $key   Field key.
+	 * @param mixed  $value Posted value.
+	 * @return string
+	 * @throws Exception When the URL is not acceptable.
+	 */
 	public function validate_api_base_url_field( $key, $value ) {
 		$url   = rtrim( trim( (string) wp_unslash( (string) $value ) ), '/' );
-		$parts = ( '' === $url || 1 === preg_match( '/\s/', $url ) ) ? false : parse_url( $url );
+		$parts = ( '' === $url || 1 === preg_match( '/\s/', $url ) ) ? false : wp_parse_url( $url );
 
 		if ( ! is_array( $parts ) || empty( $parts['scheme'] ) || empty( $parts['host'] )
 			|| isset( $parts['query'] ) || isset( $parts['fragment'] ) || isset( $parts['user'] ) || isset( $parts['pass'] ) ) {
-			throw new Exception( __( 'The API base URL must be an absolute http or https URL, for example https://api.example.com.', 'card-to-crypto-gateway' ) );
+			throw new Exception( esc_html__( 'The API base URL must be an absolute http or https URL, for example https://api.example.com.', 'card-to-crypto-gateway' ) );
 		}
 
 		$scheme = strtolower( (string) $parts['scheme'] );
 		$host   = strtolower( (string) $parts['host'] );
 		if ( 'https' !== $scheme && ! ( 'http' === $scheme && in_array( $host, array( 'localhost', '127.0.0.1' ), true ) ) ) {
-			throw new Exception( __( 'Plain http is accepted for localhost only. Use https for a remote API.', 'card-to-crypto-gateway' ) );
+			throw new Exception( esc_html__( 'Plain http is accepted for localhost only. Use https for a remote API.', 'card-to-crypto-gateway' ) );
 		}
 
 		return $url;
 	}
 
+	/**
+	 * Shows the gateway at checkout only when it is enabled, keyed, and the store currency is supported.
+	 */
 	public function is_available() {
 		if ( ! parent::is_available() ) {
 			return false;
@@ -241,10 +276,16 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 		return in_array( strtoupper( (string) get_woocommerce_currency() ), self::SUPPORTED_CURRENCIES, true );
 	}
 
+	/**
+	 * True when the gateway has no secret key yet (WooCommerce then opens the settings page).
+	 */
 	public function needs_setup() {
 		return '' === (string) $this->get_option( 'secret_key' );
 	}
 
+	/**
+	 * Output under the payment method title at checkout.
+	 */
 	public function payment_fields() {
 		$description = $this->get_description();
 		if ( '' !== $description ) {
@@ -259,7 +300,7 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 	/**
 	 * Starts a card payment for the order and sends the customer to the hosted checkout.
 	 *
-	 * @param int $order_id
+	 * @param int $order_id WooCommerce order id.
 	 * @return array{result: string, redirect?: string}
 	 */
 	public function process_payment( $order_id ) {
@@ -283,17 +324,23 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 				)
 			);
 		} catch ( Throwable $e ) {
-			CardCrypto_Logger::error( 'Unexpected error while starting a card payment.', array( 'order_id' => $order->get_id(), 'error' => $e->getMessage() ) );
+			CardCrypto_Logger::error(
+				'Unexpected error while starting a card payment.',
+				array(
+					'order_id' => $order->get_id(),
+					'error'    => $e->getMessage(),
+				)
+			);
 		}
 
 		return $this->start_failed();
 	}
 
 	/**
-	 * Return-page check. The URL the customer comes back to is not trusted, so this looks the
-	 * payment up in the API and completes the order only when the money has been captured.
+	 * Return-page check (woocommerce_thankyou_cardcrypto). The return URL is not trusted, so the payment
+	 * is looked up in the API, and the order is completed only when the money has been captured.
 	 *
-	 * @param int $order_id
+	 * @param int $order_id WooCommerce order id.
 	 */
 	public function thankyou_page( $order_id ) {
 		$order = wc_get_order( $order_id );
@@ -309,26 +356,46 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 		try {
 			$payment = $this->api()->get_payment( $payment_id );
 		} catch ( Throwable $e ) {
-			CardCrypto_Logger::error( 'Could not confirm the card payment on the return page. The webhook will complete the order.', array( 'order_id' => $order->get_id(), 'error' => $e->getMessage() ) );
+			CardCrypto_Logger::error(
+				'Could not confirm the card payment on the return page. The webhook will complete the order.',
+				array(
+					'order_id' => $order->get_id(),
+					'error'    => $e->getMessage(),
+				)
+			);
 			return;
 		}
 
 		$status = (string) ( $payment['status'] ?? '' );
 		if ( ! in_array( $status, self::PAID_STATUSES, true ) || ! self::payment_matches_order( $payment, $order ) ) {
-			CardCrypto_Logger::debug( 'Return page: card payment not captured yet.', array( 'order_id' => $order->get_id(), 'status' => $status ) );
+			CardCrypto_Logger::debug(
+				'Return page: card payment not captured yet.',
+				array(
+					'order_id' => $order->get_id(),
+					'status'   => $status,
+				)
+			);
 			return;
 		}
 
 		try {
 			self::complete_order_for_payment( $order, $payment_id );
 		} catch ( Throwable $e ) {
-			CardCrypto_Logger::error( 'Return page could not complete the order.', array( 'order_id' => $order->get_id(), 'error' => $e->getMessage() ) );
+			CardCrypto_Logger::error(
+				'Return page could not complete the order.',
+				array(
+					'order_id' => $order->get_id(),
+					'error'    => $e->getMessage(),
+				)
+			);
 		}
 	}
 
 	/**
 	 * Marks an order paid for a captured CardCrypto payment. Shared by the return page and the webhook.
 	 *
+	 * @param WC_Order $order      Order to complete.
+	 * @param string   $payment_id CardCrypto payment id.
 	 * @return string 'completed', 'already_completed' or 'not_open'.
 	 * @throws RuntimeException When WooCommerce cannot save the order (the webhook is then retried).
 	 */
@@ -342,7 +409,8 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 		}
 
 		if ( ! $order->payment_complete( $payment_id ) ) {
-			throw new RuntimeException( 'WooCommerce did not complete order ' . $order->get_id() . ' for payment ' . $payment_id . '.' );
+			// Not shown to customers; the webhook path rethrows this so the backend retries.
+			throw new RuntimeException( 'WooCommerce did not complete order ' . $order->get_id() . ' for payment ' . $payment_id . '.' ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Logged, never printed.
 		}
 
 		$order->add_order_note( sprintf( 'CardCrypto payment %s captured. Order marked as paid.', $payment_id ) );
@@ -350,7 +418,12 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 		return 'completed';
 	}
 
-	/** True when the webhook's amount, currency and order id match the order. */
+	/**
+	 * True when a webhook event's order id, amount and currency match the order.
+	 *
+	 * @param array<string, mixed> $event Decoded event.
+	 * @param WC_Order             $order Order to compare with.
+	 */
 	public static function event_matches_order( array $event, WC_Order $order ): bool {
 		return self::terms_match(
 			(string) ( $event['order_id'] ?? '' ),
@@ -360,7 +433,12 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 		);
 	}
 
-	/** True when a payment fetched from the API belongs to this order with the same amount and currency. */
+	/**
+	 * True when a payment fetched from the API belongs to this order with the same amount and currency.
+	 *
+	 * @param array<string, mixed> $payment Payment view from the API.
+	 * @param WC_Order             $order   Order to compare with.
+	 */
 	public static function payment_matches_order( array $payment, WC_Order $order ): bool {
 		return self::terms_match(
 			(string) ( $payment['order_id'] ?? '' ),
@@ -370,7 +448,11 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 		);
 	}
 
-	/** Shows only the prefix and the last four characters, for the placeholder. */
+	/**
+	 * Masked form of a secret for the settings placeholder: the prefix and the last four characters.
+	 *
+	 * @param string $secret Saved secret.
+	 */
 	public static function mask_secret( string $secret ): string {
 		$prefix = '';
 		if ( 1 === preg_match( '/^(sk_(?:test|live)_|whsec_)/', $secret, $matches ) ) {
@@ -382,7 +464,11 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 		return $prefix . str_repeat( '*', 8 ) . $tail;
 	}
 
-	/** @return array<string, mixed> */
+	/**
+	 * Saved gateway settings, read straight from the option (for code that runs outside the gateway object).
+	 *
+	 * @return array<string, mixed>
+	 */
 	public static function saved_settings(): array {
 		$settings = get_option( self::OPTION_KEY, array() );
 
@@ -390,16 +476,17 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 	}
 
 	/**
-	 * Calls GET /healthz and an authenticated endpoint with the saved key, and returns a result
-	 * for the admin notice. Nothing secret is included in the message.
+	 * Calls GET /healthz and an authenticated endpoint with the key, and returns the result for the admin
+	 * notice. The message never contains a credential.
 	 *
+	 * @param CardCrypto_Api $api Client built from the saved settings.
 	 * @return array{ok: bool, message: string}
 	 */
 	public static function check_connection( CardCrypto_Api $api ): array {
 		try {
 			$health = $api->health();
 			if ( 'ok' !== ( $health['status'] ?? null ) ) {
-				return self::connection_result( false, __( 'The API health check returned an unexpected response.', 'card-to-crypto-gateway' ) );
+				return self::connection_result( false, esc_html__( 'The API health check returned an unexpected response.', 'card-to-crypto-gateway' ) );
 			}
 
 			$api->verify_key();
@@ -412,24 +499,27 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 		return self::connection_result(
 			true,
 			'' === $mode
-				? __( 'Connection OK. The API accepted the secret key.', 'card-to-crypto-gateway' )
+				? esc_html__( 'Connection OK. The API accepted the secret key.', 'card-to-crypto-gateway' )
 				/* translators: %s: "test" or "live". */
-				: sprintf( __( 'Connection OK. The API accepted the secret key (%s mode).', 'card-to-crypto-gateway' ), $mode )
+				: sprintf( esc_html__( 'Connection OK. The API accepted the secret key (%s mode).', 'card-to-crypto-gateway' ), $mode )
 		);
 	}
 
-	/** admin-post handler for the "Test connection" link. */
+	/**
+	 * Handles the admin-post request for the "Test connection" link. Checks the nonce and the capability,
+	 * stores the result for one notice, and redirects back to the settings page.
+	 */
 	public static function handle_test_connection(): void {
 		check_admin_referer( 'cardcrypto_test_connection' );
 
-		if ( ! current_user_can( 'manage_woocommerce' ) ) {
+		if ( ! current_user_can( 'manage_woocommerce' ) ) { // phpcs:ignore WordPress.WP.Capabilities.Unknown -- WooCommerce's capability.
 			wp_die( esc_html__( 'You do not have permission to test this connection.', 'card-to-crypto-gateway' ), '', array( 'response' => 403 ) );
 		}
 
 		try {
 			$result = self::check_connection( self::api_for_settings( self::saved_settings() ) );
 		} catch ( Throwable $e ) {
-			$result = self::connection_result( false, __( 'The gateway is not configured. Save the API base URL and the secret key first.', 'card-to-crypto-gateway' ) );
+			$result = self::connection_result( false, esc_html__( 'The gateway is not configured. Save the API base URL and the secret key first.', 'card-to-crypto-gateway' ) );
 		}
 
 		set_transient( self::TEST_RESULT_PREFIX . get_current_user_id(), $result, 120 );
@@ -438,9 +528,12 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 		exit;
 	}
 
-	/** admin_notices callback: shows the result of the last connection test once. */
+	/**
+	 * Shows the result of the last connection test once (admin_notices callback).
+	 */
 	public static function render_test_notice(): void {
-		if ( ! isset( $_GET['section'], $_GET['cardcrypto_test'] ) || self::GATEWAY_ID !== sanitize_key( wp_unslash( $_GET['section'] ) ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Display only.
+		// Display only, so no nonce is needed.
+		if ( ! isset( $_GET['section'], $_GET['cardcrypto_test'] ) || self::GATEWAY_ID !== sanitize_key( wp_unslash( $_GET['section'] ) ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 			return;
 		}
 
@@ -459,7 +552,12 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 		);
 	}
 
-	/** @param array<string, mixed> $settings */
+	/**
+	 * Builds an API client from settings, or throws when the base URL or key is missing.
+	 *
+	 * @param array<string, mixed> $settings Gateway settings.
+	 * @throws CardCrypto_Api_Exception When not configured.
+	 */
 	public static function api_for_settings( array $settings ): CardCrypto_Api {
 		$base_url = (string) ( $settings['api_base_url'] ?? '' );
 		$secret   = (string) ( $settings['secret_key'] ?? '' );
@@ -471,6 +569,11 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 		return new CardCrypto_Api( $base_url, $secret );
 	}
 
+	/**
+	 * API client for the current settings.
+	 *
+	 * @throws CardCrypto_Api_Exception When not configured.
+	 */
 	private function api(): CardCrypto_Api {
 		return self::api_for_settings(
 			array(
@@ -483,13 +586,14 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 	/**
 	 * Creates the payment, or reuses the open one, and returns the redirect to the hosted checkout.
 	 *
-	 * Idempotency: the key is "cardcrypto-wc-<order>-<n>", where n = stored attempt + 1. The stored
-	 * attempt moves only when a key has been spent, that is, when it created a payment we keep or
-	 * when the API answered with a definitive 4xx. A transient failure (network, 5xx, timeout)
-	 * leaves n unchanged, so retrying the same attempt replays the same result.
+	 * Idempotency: the key is "cardcrypto-wc-<order>-<n>", where n = stored attempt + 1. The stored attempt
+	 * moves only when a key has been spent: when it created a payment that is kept, or when the API answered
+	 * with a definitive 4xx. A transient failure (network, 5xx, timeout) leaves n unchanged, so retrying the
+	 * same attempt replays the same result.
 	 *
+	 * @param WC_Order $order Order being paid.
 	 * @return array{result: string, redirect?: string}
-	 * @throws CardCrypto_Api_Exception
+	 * @throws CardCrypto_Api_Exception On failure. The caller shows the generic notice.
 	 */
 	private function start_card_payment( WC_Order $order ): array {
 		$api      = $this->api();
@@ -507,25 +611,39 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 				if ( self::money_captured( $existing ) ) {
 					if ( $matches && in_array( $status, self::PAID_STATUSES, true ) ) {
 						if ( 'not_open' === self::complete_order_for_payment( $order, $payment_id ) ) {
-							$order->add_order_note( sprintf( 'CardCrypto payment %s is captured while this order is %s. The order was not changed automatically.', $payment_id, $order->get_status() ) );
+							$order->add_order_note( sprintf( 'CardCrypto payment %1$s is captured while this order is %2$s. The order was not changed automatically.', $payment_id, $order->get_status() ) );
 						}
+
 						return $this->success( $this->get_return_url( $order ) );
 					}
 
 					// Captured money must never lead to a second payment for the same order.
-					$order->add_order_note( sprintf( 'CardCrypto payment %s is %s and was not replaced. Review it in the CardCrypto dashboard.', $payment_id, $status ) );
-					CardCrypto_Logger::error( 'Captured card payment found for an order that is not paid; no new payment created.', array( 'order_id' => $order->get_id(), 'status' => $status ) );
+					$order->add_order_note( sprintf( 'CardCrypto payment %1$s is %2$s and was not replaced. Review it in the CardCrypto dashboard.', $payment_id, $status ) );
+					CardCrypto_Logger::error(
+						'Captured card payment found for an order that is not paid; no new payment created.',
+						array(
+							'order_id' => $order->get_id(),
+							'status'   => $status,
+						)
+					);
 					return $this->start_failed();
 				}
 
 				if ( $matches && in_array( $status, self::OPEN_STATUSES, true ) ) {
-					CardCrypto_Logger::debug( 'Reusing the open card checkout.', array( 'order_id' => $order->get_id(), 'status' => $status ) );
+					CardCrypto_Logger::debug(
+						'Reusing the open card checkout.',
+						array(
+							'order_id' => $order->get_id(),
+							'status'   => $status,
+						)
+					);
 					return $this->success( self::checkout_url_from( $existing ) );
 				}
 
 				if ( $matches && 'PAYMENT_AUTHORIZED' === $status ) {
 					return $this->start_failed(); // Being captured right now; the customer can retry shortly.
 				}
+
 				// Otherwise the stored payment is closed (FAILED, CANCELLED), expired, or open for other terms: a new payment follows.
 			}
 		}
@@ -538,6 +656,7 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 				self::idempotency_key( $order, $key_number )
 			);
 		} catch ( CardCrypto_Api_Exception $e ) {
+			// The API already holds an open payment for this order, for example after a lost response. Adopt it.
 			if ( 'payment_already_open' === $e->api_code && is_string( $e->details['payment_id'] ?? null ) ) {
 				$adopted = $this->adopt_open_payment( $api, $order, $e->details['payment_id'], $key_number );
 				if ( null !== $adopted ) {
@@ -555,16 +674,25 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 		$url = self::checkout_url_from( $created );
 		self::remember_attempt( $order, $key_number, (string) $created['id'] );
 
-		CardCrypto_Logger::debug( 'Card payment created.', array( 'order_id' => $order->get_id(), 'attempt' => $key_number ) );
+		CardCrypto_Logger::debug(
+			'Card payment created.',
+			array(
+				'order_id' => $order->get_id(),
+				'attempt'  => $key_number,
+			)
+		);
 
 		return $this->success( $url );
 	}
 
 	/**
-	 * The API reports an open payment for this order (for example after a lost response). Adopt it
-	 * when it matches the order and can still be paid; otherwise return null.
+	 * Adopts an open payment the API reports for this order, when it matches and can still be paid.
 	 *
-	 * @return array{result: string, redirect: string}|null
+	 * @param CardCrypto_Api $api        API client.
+	 * @param WC_Order       $order      Order being paid.
+	 * @param string         $payment_id Payment id from the conflict response.
+	 * @param int            $key_number Key number that was spent by the conflict.
+	 * @return array{result: string, redirect: string}|null Null when the payment cannot be adopted.
 	 */
 	private function adopt_open_payment( CardCrypto_Api $api, WC_Order $order, string $payment_id, int $key_number ): ?array {
 		$payment = $this->payment_or_null( $api, $payment_id );
@@ -578,7 +706,14 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 		return $this->success( $url );
 	}
 
-	/** @return array<string, mixed>|null Null when the API does not know the payment in this mode. */
+	/**
+	 * Fetches a payment, or returns null when the API does not know it in this mode.
+	 *
+	 * @param CardCrypto_Api $api        API client.
+	 * @param string         $payment_id Payment id.
+	 * @return array<string, mixed>|null
+	 * @throws CardCrypto_Api_Exception On failures other than not_found.
+	 */
 	private function payment_or_null( CardCrypto_Api $api, string $payment_id ): ?array {
 		try {
 			return $api->get_payment( $payment_id );
@@ -592,8 +727,11 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 	}
 
 	/**
-	 * Body for POST /v1/payments. Only keys the backend schema accepts are sent (it rejects unknown keys).
+	 * Body for POST /v1/payments. Only keys the backend schema accepts are sent, because the backend rejects unknown keys.
 	 *
+	 * @param WC_Order $order    Order being paid.
+	 * @param string   $amount   Two-decimal amount.
+	 * @param string   $currency ISO currency code.
 	 * @return array<string, mixed>
 	 */
 	private function payment_body( WC_Order $order, string $amount, string $currency ): array {
@@ -601,7 +739,12 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 			'amount'      => $amount,
 			'currency'    => $currency,
 			'order_id'    => (string) $order->get_id(),
-			'description' => substr( sprintf( __( 'Order %s', 'card-to-crypto-gateway' ), $order->get_order_number() ), 0, 250 ),
+			'description' => substr(
+				/* translators: %s: WooCommerce order number. */
+				sprintf( __( 'Order %s', 'card-to-crypto-gateway' ), $order->get_order_number() ),
+				0,
+				250
+			),
 			'return_url'  => $this->get_return_url( $order ),
 			'cancel_url'  => $order->get_cancel_order_url_raw(),
 			'metadata'    => array(
@@ -619,10 +762,23 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 		return $body;
 	}
 
+	/**
+	 * Idempotency-Key for an order and attempt number (8 to 255 characters).
+	 *
+	 * @param WC_Order $order      Order.
+	 * @param int      $key_number Attempt number.
+	 */
 	private static function idempotency_key( WC_Order $order, int $key_number ): string {
-		return sprintf( 'cardcrypto-wc-%d-%d', $order->get_id(), $key_number );
+		return sprintf( 'cardcrypto-wc-%1$d-%2$d', $order->get_id(), $key_number );
 	}
 
+	/**
+	 * Stores the spent attempt number and, when there is one, the payment id, then saves the order.
+	 *
+	 * @param WC_Order    $order      Order.
+	 * @param int         $key_number Attempt number that was spent.
+	 * @param string|null $payment_id Payment that the attempt created or adopted.
+	 */
 	private static function remember_attempt( WC_Order $order, int $key_number, ?string $payment_id = null ): void {
 		$order->update_meta_data( self::META_ATTEMPT, $key_number );
 		if ( null !== $payment_id ) {
@@ -631,6 +787,12 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 		$order->save();
 	}
 
+	/**
+	 * Order total as a two-decimal string with a dot, for example "100.00".
+	 *
+	 * @param WC_Order $order Order.
+	 * @throws CardCrypto_Api_Exception When the total is not a positive amount.
+	 */
 	private static function order_amount( WC_Order $order ): string {
 		$amount = wc_format_decimal( $order->get_total(), 2 );
 
@@ -641,6 +803,12 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 		return $amount;
 	}
 
+	/**
+	 * Order currency, upper case, if CardCrypto supports it.
+	 *
+	 * @param WC_Order $order Order.
+	 * @throws CardCrypto_Api_Exception When the currency is not supported.
+	 */
 	private static function order_currency( WC_Order $order ): string {
 		$currency = strtoupper( (string) $order->get_currency() );
 
@@ -651,7 +819,12 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 		return $currency;
 	}
 
-	/** @param array<string, mixed> $payment */
+	/**
+	 * Returns the checkout URL of a payment, or throws when it is not an http(s) URL.
+	 *
+	 * @param array<string, mixed> $payment Payment view.
+	 * @throws CardCrypto_Api_Exception When the URL is missing or invalid.
+	 */
 	private static function checkout_url_from( array $payment ): string {
 		$url = $payment['checkout_url'] ?? null;
 
@@ -662,18 +835,36 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 		return $url;
 	}
 
-	/** Captured, or captured and later failed in settlement: the money must not be charged again. */
+	/**
+	 * True when the money has been captured: the status is a paid status, or captured_at is set.
+	 * The second check covers a payment that was captured and then failed in settlement.
+	 *
+	 * @param array<string, mixed> $payment Payment view.
+	 */
 	private static function money_captured( array $payment ): bool {
 		return in_array( (string) ( $payment['status'] ?? '' ), self::PAID_STATUSES, true ) || ! empty( $payment['captured_at'] );
 	}
 
+	/**
+	 * Compares an order id, amount and currency with the order's own values.
+	 *
+	 * @param string   $order_id Order id as the API reports it.
+	 * @param string   $amount   Amount as the API reports it.
+	 * @param string   $currency Currency as the API reports it.
+	 * @param WC_Order $order    Order.
+	 */
 	private static function terms_match( string $order_id, string $amount, string $currency, WC_Order $order ): bool {
 		return $order_id === (string) $order->get_id()
 			&& $amount === wc_format_decimal( $order->get_total(), 2 )
 			&& strtoupper( $currency ) === strtoupper( (string) $order->get_currency() );
 	}
 
-	/** @return array{result: string, redirect: string} */
+	/**
+	 * Success result that sends the customer to a URL.
+	 *
+	 * @param string $redirect URL to redirect to.
+	 * @return array{result: string, redirect: string}
+	 */
 	private function success( string $redirect ): array {
 		return array(
 			'result'   => 'success',
@@ -681,14 +872,24 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 		);
 	}
 
-	/** Shows the one customer-facing message for every failure. Details go to the log only. */
+	/**
+	 * Shows the one customer-facing message for every failure. Details go to the log only.
+	 *
+	 * @return array{result: string}
+	 */
 	private function start_failed(): array {
 		wc_add_notice( __( 'We could not start the card payment. Please try again.', 'card-to-crypto-gateway' ), 'error' );
 
 		return array( 'result' => 'failure' );
 	}
 
-	/** @return array{ok: bool, message: string} */
+	/**
+	 * Builds a connection-test result.
+	 *
+	 * @param bool   $ok      Whether the test passed.
+	 * @param string $message Message for the admin notice.
+	 * @return array{ok: bool, message: string}
+	 */
 	private static function connection_result( bool $ok, string $message ): array {
 		return array(
 			'ok'      => $ok,
@@ -696,11 +897,17 @@ class WC_Gateway_CardCrypto extends WC_Payment_Gateway {
 		);
 	}
 
+	/**
+	 * Explains a failed connection test in words an administrator can act on.
+	 *
+	 * @param CardCrypto_Api_Exception $e The failure.
+	 */
 	private static function describe_connection_failure( CardCrypto_Api_Exception $e ): string {
 		return match ( $e->category ) {
-			'network'  => __( 'Could not reach the API. Check the API base URL and that the server is running.', 'card-to-crypto-gateway' ),
-			'auth'     => __( 'The API rejected the secret key. Check that you pasted the full key.', 'card-to-crypto-gateway' ),
-			default    => sprintf( __( 'The API answered with an error (HTTP %s).', 'card-to-crypto-gateway' ), (string) ( $e->http_status ?? 'unknown' ) ),
+			'network' => esc_html__( 'Could not reach the API. Check the API base URL and that the server is running.', 'card-to-crypto-gateway' ),
+			'auth'    => esc_html__( 'The API rejected the secret key. Check that you pasted the full key.', 'card-to-crypto-gateway' ),
+			/* translators: %s: HTTP status code returned by the API. */
+			default   => sprintf( esc_html__( 'The API answered with an error (HTTP %s).', 'card-to-crypto-gateway' ), (string) ( $e->http_status ?? 'unknown' ) ),
 		};
 	}
 }

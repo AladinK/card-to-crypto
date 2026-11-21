@@ -21,6 +21,7 @@ define( 'CARDCRYPTO_WC_VERSION', '0.1.0' );
 
 require_once __DIR__ . '/includes/class-cardcrypto-signature.php';
 require_once __DIR__ . '/includes/class-cardcrypto-logger.php';
+require_once __DIR__ . '/includes/class-cardcrypto-api-exception.php';
 require_once __DIR__ . '/includes/class-cardcrypto-api.php';
 require_once __DIR__ . '/includes/class-cardcrypto-webhook.php';
 
@@ -55,6 +56,9 @@ function cardcrypto_wc_declare_hpos_compatibility(): void {
 	}
 }
 
+/**
+ * Registers the gateway, the webhook route and the connection-test handlers once WooCommerce is loaded.
+ */
 function cardcrypto_wc_bootstrap(): void {
 	if ( ! class_exists( 'WooCommerce' ) ) {
 		add_action( 'admin_notices', 'cardcrypto_wc_missing_woocommerce_notice' );
@@ -70,7 +74,9 @@ function cardcrypto_wc_bootstrap(): void {
 }
 
 /**
- * @param array<int, string> $gateways
+ * Adds the gateway class to WooCommerce's list of payment gateways.
+ *
+ * @param array<int, string> $gateways Gateway class names.
  * @return array<int, string>
  */
 function cardcrypto_wc_register_gateway( array $gateways ): array {
@@ -79,6 +85,9 @@ function cardcrypto_wc_register_gateway( array $gateways ): array {
 	return $gateways;
 }
 
+/**
+ * Admin notice shown when WooCommerce is not active.
+ */
 function cardcrypto_wc_missing_woocommerce_notice(): void {
 	if ( ! current_user_can( 'activate_plugins' ) ) {
 		return;
@@ -91,7 +100,9 @@ function cardcrypto_wc_missing_woocommerce_notice(): void {
 }
 
 /**
- * @param array<int, string> $links
+ * Adds a Settings link to the plugin's row on the Plugins screen.
+ *
+ * @param array<int, string> $links Existing action links.
  * @return array<int, string>
  */
 function cardcrypto_wc_action_links( array $links ): array {

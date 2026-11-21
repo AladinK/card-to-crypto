@@ -2,65 +2,56 @@
 /**
  * HTTP client for the CardCrypto API, built on wp_remote_request().
  *
- * Every call has a 15 second timeout and does not follow redirects, so the bearer token is
- * never sent to a host other than the configured API base URL. Failures are mapped to
- * CardCrypto_Api_Exception with a category that tells the caller whether the same
- * Idempotency-Key may be retried (transient) or the attempt is over (definitive).
+ * Every call has a 15 second timeout and does not follow redirects, so the bearer token is never
+ * sent to a host other than the configured API base URL. Failures are mapped to
+ * CardCrypto_Api_Exception, whose category says whether the same Idempotency-Key may be retried.
  *
  * @package CardCryptoGateway
  */
 
 defined( 'ABSPATH' ) || exit;
 
+// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception messages are logged, never printed.
+
 /**
- * Raised for every failed API call. The message is for logs only; customers never see it.
+ * Client for the CardCrypto API routes that the plugin uses.
  */
-final class CardCrypto_Api_Exception extends RuntimeException {
-
-	/**
-	 * @param string               $category    network, busy, rate_limited, server, bad_response, unexpected,
-	 *                                          auth, not_found, conflict, invalid_request, not_configured, local.
-	 * @param array<string, mixed> $details     The API's error.details object, when present.
-	 */
-	public function __construct(
-		public readonly string $category,
-		public readonly ?int $http_status,
-		public readonly ?string $api_code,
-		public readonly ?string $request_id,
-		public readonly array $details,
-		string $message
-	) {
-		parent::__construct( $message );
-	}
-
-	/** The same Idempotency-Key may be sent again: the request may or may not have been applied. */
-	public function is_transient(): bool {
-		return in_array( $this->category, array( 'network', 'busy', 'rate_limited', 'server', 'bad_response', 'unexpected' ), true );
-	}
-
-	/** The API answered with a 4xx: that key's result is stored by the backend and will be replayed. */
-	public function is_definitive(): bool {
-		return in_array( $this->category, array( 'auth', 'not_found', 'conflict', 'invalid_request' ), true );
-	}
-}
-
 final class CardCrypto_Api {
 
+	/** Seconds before a request is abandoned. */
 	public const TIMEOUT_SECONDS = 15;
 
+	/** Payment ids are letters, digits, "_" and "-". Anything else never reaches a URL. */
 	private const ID_PATTERN = '/^[A-Za-z0-9_-]{3,100}$/';
 
+	/**
+	 * Base URL without a trailing slash.
+	 *
+	 * @var string
+	 */
 	private string $base_url;
 
+	/**
+	 * Creates a client for one API origin and key.
+	 *
+	 * @param string $base_url   Absolute http(s) origin, optionally with a path prefix.
+	 * @param string $secret_key sk_test_... or sk_live_...; the prefix selects the mode.
+	 * @throws CardCrypto_Api_Exception When the base URL is not an absolute http(s) URL.
+	 */
 	public function __construct( string $base_url, private readonly string $secret_key ) {
 		$this->base_url = rtrim( trim( $base_url ), '/' );
+
 		// Absolute http(s) origin, optionally with a path prefix; no query or fragment.
 		if ( 1 !== preg_match( '#^https?://[^/\s?\#]+(/[^\s?\#]*)?$#i', $this->base_url ) ) {
 			throw new CardCrypto_Api_Exception( 'not_configured', null, null, null, array(), 'The API base URL must be an absolute http or https URL.' );
 		}
 	}
 
-	/** "test" or "live", read from the secret key prefix; "" when the prefix is unknown. */
+	/**
+	 * Returns "test" or "live" from the secret key prefix, or "" for an unknown prefix.
+	 *
+	 * @param string $secret_key Secret key.
+	 */
 	public static function mode_for_key( string $secret_key ): string {
 		if ( str_starts_with( $secret_key, 'sk_live_' ) ) {
 			return 'live';
@@ -69,18 +60,27 @@ final class CardCrypto_Api {
 		return str_starts_with( $secret_key, 'sk_test_' ) ? 'test' : '';
 	}
 
+	/** Returns the mode of the configured secret key. */
 	public function mode(): string {
 		return self::mode_for_key( $this->secret_key );
 	}
 
-	/** GET /healthz (no authentication). */
+	/**
+	 * GET /healthz. No authentication.
+	 *
+	 * @return array<string, mixed>
+	 * @throws CardCrypto_Api_Exception On any failure.
+	 */
 	public function health(): array {
 		return $this->request( 'GET', '/healthz', null, null, false );
 	}
 
 	/**
-	 * Confirms that the secret key is accepted. GET /v1/me is dashboard-only (it rejects API keys),
+	 * Confirms that the secret key is accepted. GET /v1/me is dashboard-only and rejects API keys,
 	 * so a one-item payment list is used instead.
+	 *
+	 * @return array<string, mixed>
+	 * @throws CardCrypto_Api_Exception On any failure.
 	 */
 	public function verify_key(): array {
 		return $this->request( 'GET', '/v1/payments?limit=1', null, null, true );
@@ -90,7 +90,10 @@ final class CardCrypto_Api {
 	 * POST /v1/payments. The same body and key always return the same payment, so a retry after a
 	 * transient failure is safe.
 	 *
-	 * @param array<string, mixed> $body
+	 * @param array<string, mixed> $body            Request body (only schema keys).
+	 * @param string               $idempotency_key 8 to 255 characters.
+	 * @return array<string, mixed> The created payment.
+	 * @throws CardCrypto_Api_Exception On any failure.
 	 */
 	public function create_payment( array $body, string $idempotency_key ): array {
 		$length = strlen( $idempotency_key );
@@ -108,7 +111,13 @@ final class CardCrypto_Api {
 		return $payment;
 	}
 
-	/** GET /v1/payments/{id}. Throws a not_found exception when the id is unknown in this mode. */
+	/**
+	 * GET /v1/payments/{id}.
+	 *
+	 * @param string $payment_id Payment id.
+	 * @return array<string, mixed>
+	 * @throws CardCrypto_Api_Exception With category not_found when the id is unknown in this mode.
+	 */
 	public function get_payment( string $payment_id ): array {
 		if ( 1 !== preg_match( self::ID_PATTERN, $payment_id ) ) {
 			throw new CardCrypto_Api_Exception( 'local', null, null, null, array(), 'Payment id has an unexpected format.' );
@@ -117,10 +126,18 @@ final class CardCrypto_Api {
 		return $this->request( 'GET', '/v1/payments/' . rawurlencode( $payment_id ), null, null, true );
 	}
 
+	// phpcs:disable Squiz.Commenting.FunctionCommentThrowTag.WrongNumber -- Both throws are CardCrypto_Api_Exception; the sniff cannot resolve the factory call.
 	/**
 	 * Sends one request and returns the decoded JSON object of a 2xx response.
 	 *
-	 * @param array<string, mixed>|null $body
+	 * @param string                    $method        HTTP method.
+	 * @param string                    $path          Path with optional query string.
+	 * @param array<string, mixed>|null $body          JSON body, or null.
+	 * @param string|null               $idempotency_key Idempotency-Key header, or null.
+	 * @param bool                      $authenticated Whether to send the bearer token.
+	 * @return array<string, mixed>
+	 * @throws CardCrypto_Api_Exception When the body cannot be encoded or the request cannot be sent.
+	 * @throws CardCrypto_Api_Exception When the API answers with an error or with a body that is not a JSON object.
 	 */
 	private function request( string $method, string $path, ?array $body, ?string $idempotency_key, bool $authenticated ): array {
 		$headers = array(
@@ -140,12 +157,13 @@ final class CardCrypto_Api {
 		);
 
 		if ( null !== $body ) {
-			$args['headers']['Content-Type'] = 'application/json';
-			try {
-				$args['body'] = json_encode( $body, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR );
-			} catch ( JsonException $e ) {
-				throw new CardCrypto_Api_Exception( 'local', null, null, null, array(), 'Request body could not be encoded as JSON.' );
+			$encoded = wp_json_encode( $body, JSON_UNESCAPED_SLASHES );
+			if ( false === $encoded ) {
+				throw new CardCrypto_Api_Exception( 'local', null, null, null, array(), 'The request body could not be encoded as JSON.' );
 			}
+
+			$args['headers']['Content-Type'] = 'application/json';
+			$args['body']                    = $encoded;
 		}
 
 		if ( null !== $idempotency_key ) {
@@ -157,7 +175,14 @@ final class CardCrypto_Api {
 		$elapsed  = (int) round( ( microtime( true ) - $started ) * 1000 );
 
 		if ( is_wp_error( $response ) ) {
-			CardCrypto_Logger::debug( 'CardCrypto API request failed before a response.', array( 'method' => $method, 'path' => $path, 'duration_ms' => $elapsed ) );
+			CardCrypto_Logger::debug(
+				'CardCrypto API request failed before a response.',
+				array(
+					'method'      => $method,
+					'path'        => $path,
+					'duration_ms' => $elapsed,
+				)
+			);
 			throw new CardCrypto_Api_Exception( 'network', null, null, null, array(), 'Network error: ' . $response->get_error_message() );
 		}
 
@@ -166,7 +191,12 @@ final class CardCrypto_Api {
 
 		CardCrypto_Logger::debug(
 			'CardCrypto API call.',
-			array( 'method' => $method, 'path' => $path, 'http_status' => $status, 'duration_ms' => $elapsed )
+			array(
+				'method'      => $method,
+				'path'        => $path,
+				'http_status' => $status,
+				'duration_ms' => $elapsed,
+			)
 		);
 
 		if ( $status >= 200 && $status < 300 ) {
@@ -180,10 +210,13 @@ final class CardCrypto_Api {
 		throw self::exception_for_error( $status, $decoded );
 	}
 
+	// phpcs:enable Squiz.Commenting.FunctionCommentThrowTag.WrongNumber
+
 	/**
-	 * Maps an error response (see the backend error envelope) to a category.
+	 * Maps an error response (the backend error envelope) to an exception with a category.
 	 *
-	 * @param array<string, mixed>|null $decoded
+	 * @param int                       $status  HTTP status.
+	 * @param array<string, mixed>|null $decoded Decoded body, or null.
 	 */
 	private static function exception_for_error( int $status, ?array $decoded ): CardCrypto_Api_Exception {
 		$error      = is_array( $decoded['error'] ?? null ) ? $decoded['error'] : array();
@@ -209,11 +242,16 @@ final class CardCrypto_Api {
 			$code,
 			$request_id,
 			$details,
-			sprintf( 'CardCrypto API returned HTTP %d (%s): %s', $status, $code ?? 'no code', $message )
+			sprintf( 'CardCrypto API returned HTTP %1$d (%2$s): %3$s', $status, $code ?? 'no code', $message )
 		);
 	}
 
-	/** @return array<string, mixed>|null */
+	/**
+	 * Decodes a JSON object, or returns null when the text is empty or not a JSON object.
+	 *
+	 * @param string $raw Response body.
+	 * @return array<string, mixed>|null
+	 */
 	private static function decode_json( string $raw ): ?array {
 		if ( '' === $raw ) {
 			return null;
@@ -228,3 +266,5 @@ final class CardCrypto_Api {
 		return is_array( $data ) ? $data : null;
 	}
 }
+
+// phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped

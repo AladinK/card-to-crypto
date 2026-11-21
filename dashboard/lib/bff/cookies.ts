@@ -6,7 +6,6 @@ import 'server-only';
  */
 export const REFRESH_COOKIE = 'cc_rt';
 export const MODE_COOKIE = 'cc_mode';
-export const THEME_COOKIE = 'cc_theme';
 
 /** Matches the API's default refresh-token lifetime (REFRESH_TOKEN_TTL_DAYS=14). */
 const SESSION_SECONDS = 14 * 24 * 60 * 60;

@@ -3,6 +3,7 @@ import { cn } from '@/lib/cn';
 
 /**
  * Scrolls horizontally inside its own box, never the page. It is focusable so keyboard users can scroll it.
+ * `relative` keeps absolutely positioned content (such as sr-only labels) clipped inside the box.
  */
 export function TableFrame({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
   return (
@@ -10,7 +11,7 @@ export function TableFrame({ label, children, className }: { label: string; chil
       role="region"
       aria-label={label}
       tabIndex={0}
-      className={cn('max-w-full overflow-x-auto rounded-xl focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none', className)}
+      className={cn('relative max-w-full overflow-x-auto rounded-xl focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none', className)}
     >
       {children}
     </div>
